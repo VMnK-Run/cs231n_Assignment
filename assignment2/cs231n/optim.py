@@ -68,7 +68,9 @@ def sgd_momentum(w, dw, config=None):
     # the next_w variable. You should also use and update the velocity v.     #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
+    v = config["momentum"] * v - config['learning_rate'] * dw
+    next_w = w + v
+    config['velocity'] = v
     pass
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -106,7 +108,8 @@ def rmsprop(w, dw, config=None):
     # config['cache'].                                                        #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
+    config['cache'] = config['decay_rate'] * config['cache'] + (1 - config['decay_rate']) * dw * dw
+    next_w = w - config['learning_rate'] * dw / (np.sqrt(config['cache'] + config['epsilon']))
     pass
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -151,7 +154,16 @@ def adam(w, dw, config=None):
     # using it in any calculations.                                           #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
+    # 第一动量
+    config['m'] = config['beta1'] * config['m'] + (1 - config['beta1']) * dw
+    # 第二动量
+    config['v'] = config['beta2'] * config['v'] + (1 - config['beta2']) * dw * dw
+    # 偏置修正
+    config['t'] += 1
+    m_unbias = config['m'] / (1 - config['beta1'] ** config['t'])
+    v_unbias = config['v'] / (1 - config['beta2'] ** config['t'])
+    # 更新参数
+    next_w = w - m_unbias * config['learning_rate'] / (np.sqrt(v_unbias) + config['epsilon'])
     pass
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****

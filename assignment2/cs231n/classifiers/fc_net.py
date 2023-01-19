@@ -73,7 +73,21 @@ class FullyConnectedNet(object):
         # parameters should be initialized to zeros.                               #
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+        self.params['W' + str(1)] = np.random.normal(loc=0.0, scale=weight_scale, size=(input_dim, hidden_dims[0]))
+        self.params['b' + str(1)] = np.zeros((hidden_dims[0], ))
+        if self.normalization == "batchnorm" or self.normalization =="layernorm":
+            self.params['gamma' + str(1)] = np.ones(hidden_dims[0])
+            self.params['beta' + str(1)] = np.zeros(hidden_dims[0])
 
+        for k in range(2, self.num_layers):
+            self.params['W' + str(k)] = np.random.normal(loc=0.0, scale=weight_scale, size=(hidden_dims[k - 2], hidden_dims[k - 1]))
+            self.params['b' + str(k)] = np.zeros((hidden_dims[k - 1],))
+            if self.normalization == "batchnorm" or self.normalization =="layernorm":
+                self.params['gamma' + str(k)] = np.ones(hidden_dims[k - 1])
+                self.params['beta' + str(k)] = np.zeros(hidden_dims[k - 1])
+
+        self.params['W' + str(self.num_layers)] = np.random.normal(loc=0.0, scale=weight_scale, size=(hidden_dims[-1], num_classes))
+        self.params['b' + str(self.num_layers)] = np.zeros((num_classes, ))
         pass
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -147,7 +161,51 @@ class FullyConnectedNet(object):
         # layer, etc.                                                              #
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+        layer_in = X  # 每一层的输入
+        cache = {}  # 每一层的cache
+        for k in range(1, self.num_layers):
+            W = self.params['W' + str(k)]
+            b = self.params['b' + str(k)]
 
+            # 在ReLU前加入BN
+            if self.normalization == 'batchnorm':
+                gamma = self.params['gamma' + str(k)]
+                beta = self.params['beta' + str(k)]
+                bn_param = self.bn_params[k - 1]
+                layer_in, cache_layer = affine_bn_relu_forward(layer_in, W, b, gamma, beta, bn_param)
+                affine_cache, bn_cache, relu_cache = cache_layer
+                cache['affine_cache' + str(k)] = affine_cache
+                cache['bn_cache' + str(k)] = bn_cache
+                cache['relu_cache' + str(k)] = relu_cache
+                pass
+            elif self.normalization == 'layernorm':
+                gamma = self.params['gamma' + str(k)]
+                beta = self.params['beta' + str(k)]
+                bn_param = self.bn_params[k - 1]
+                layer_in, cache_layer = affine_ln_relu_forward(layer_in, W, b, gamma, beta, bn_param)
+                affine_cache, ln_cache, relu_cache = cache_layer
+                cache['affine_cache' + str(k)] = affine_cache
+                cache['ln_cache' + str(k)] = ln_cache
+                cache['relu_cache' + str(k)] = relu_cache
+                pass
+            else:
+                affine_out, affine_cache = affine_forward(layer_in, W, b)
+                relu_out, relu_cache = relu_forward(affine_out)
+                layer_in = relu_out
+                cache['affine_cache' + str(k)] = affine_cache
+                cache['relu_cache' + str(k)] = relu_cache
+
+            # 在ReLU后加入DropOut
+            if self.use_dropout:
+                layer_in, dropout_cache = dropout_forward(layer_in, self.dropout_param)
+                cache['dropout_cache' + str(k)] = dropout_cache
+
+        W = self.params['W'+str(self.num_layers)]
+        b = self.params['b'+str(self.num_layers)]
+
+        affine_out, affine_cache = affine_forward(layer_in, W, b)
+        scores = affine_out
+        cache['affine_cache' + str(self.num_layers)] = affine_cache
         pass
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -174,7 +232,52 @@ class FullyConnectedNet(object):
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+        # 先计算损失, 每一层的正则项加起来
+        loss, d_affine_out = softmax_loss(scores, y)
+        for k in range(1, self.num_layers + 1):
+            W = self.params["W"+str(k)]
+            loss += 0.5 * self.reg * np.sum(np.square(W))
 
+        W = self.params['W' + str(self.num_layers)]
+        affine_cache = cache['affine_cache' + str(self.num_layers)]
+        d_relu_out, dw, db = affine_backward(d_affine_out, affine_cache)
+        dw += self.reg * W
+        grads['W' + str(self.num_layers)] = dw
+        grads['b' + str(self.num_layers)] = db
+
+        for k in range(self.num_layers - 1, 0, -1):
+            W = self.params['W' + str(k)]
+
+            # 先计算Dropout层的后向传播
+            if self.use_dropout:
+                d_relu_out = dropout_backward(d_relu_out, cache['dropout_cache' + str(k)])
+
+            if self.normalization == "batchnorm":
+                affine_cache = cache['affine_cache' + str(k)]
+                bn_cache = cache['bn_cache' + str(k)]
+                relu_cache = cache['relu_cache' + str(k)]
+                cache_layer = (affine_cache, bn_cache, relu_cache)
+                d_relu_out, dw, db, dgamma, dbeta = affine_bn_relu_backward(d_relu_out, cache_layer)
+                grads['gamma' + str(k)] = dgamma
+                grads['beta' + str(k)] = dbeta
+            elif self.normalization == "layernorm":
+                affine_cache = cache['affine_cache' + str(k)]
+                ln_cache = cache['ln_cache' + str(k)]
+                relu_cache = cache['relu_cache' + str(k)]
+                cache_layer = (affine_cache, ln_cache, relu_cache)
+                d_relu_out, dw, db, dgamma, dbeta = affine_ln_relu_backward(d_relu_out, cache_layer)
+                grads['gamma' + str(k)] = dgamma
+                grads['beta' + str(k)] = dbeta
+                pass
+            else:
+                affine_cache = cache['affine_cache' + str(k)]
+                relu_cache = cache['relu_cache' + str(k)]
+                d_affine_out = relu_backward(d_relu_out, relu_cache)
+                d_relu_out, dw, db = affine_backward(d_affine_out, affine_cache)
+
+            dw += self.reg * W
+            grads['W' + str(k)] = dw
+            grads['b' + str(k)] = db
         pass
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
